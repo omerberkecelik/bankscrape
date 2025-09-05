@@ -1,0 +1,43 @@
+name: build-windows-exe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**.py'
+      - 'requirements.txt'
+      - '.github/workflows/build-windows.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install chromium
+
+      - name: Bundle Playwright browsers
+        shell: pwsh
+        run: |
+          $pw = "$env:LOCALAPPDATA\ms-playwright"
+          if (!(Test-Path $pw)) { throw "ms-playwright not found after install" }
+          Copy-Item -Recurse -Force "$pw" "ms-playwright"
+
+      - name: Build EXE with PyInstaller
+        run: pyinstaller --noconsole --onefile --name BankBenchmark --collect-all playwright --runtime-hook rthook_playwright.py --add-data "ms-playwright;ms-playwright" run_benchmark_gui.py
+
+      - name: Upload artifact
+        uses: ac
+
