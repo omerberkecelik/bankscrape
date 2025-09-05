@@ -17,27 +17,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show repo tree
+        shell: bash
+        run: |
+          echo "== REPO ROOT =="
+          ls -la
+          echo "== PY FILES =="
+          ls -la *.py || true
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install Python deps
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -m pip show pyinstaller
+          python -m pip show playwright
           python -m playwright install chromium
 
-      - name: Bundle Playwright browsers
+      - name: Verify Playwright browsers and copy next to project
         shell: pwsh
         run: |
           $pw = "$env:LOCALAPPDATA\ms-playwright"
-          if (!(Test-Path $pw)) { throw "ms-playwright not found after install" }
+          Write-Host "Looking for browsers at: $pw"
+          if (!(Test-Path $pw)) { throw "ms-playwright not found after playwright install" }
+          Get-ChildItem -Recurse -Depth 2 $pw | Select-Object FullName | Out-Host
           Copy-Item -Recurse -Force "$pw" "ms-playwright"
+          if (!(Test-Path "ms-playwright")) { throw "Failed to copy ms-playwright" }
 
       - name: Build EXE with PyInstaller
-        run: pyinstaller --noconsole --onefile --name BankBenchmark --collect-all playwright --runtime-hook rthook_playwright.py --add-data "ms-playwright;ms-playwright" run_benchmark_gui.py
+        shell: bash
+        run: |
+          # Fail early if entry file is missing
+          test -f run_benchmark_gui.py || (echo "run_benchmark_gui.py not found in repo root" && exit 1)
+          pyinstaller --noconsole --onefile --name BankBenchmark \
+            --collect-all playwright \
+            --runtime-hook rthook_playwright.py \
+            --add-data "ms-playwright;ms-playwright" \
+            run_benchmark_gui.py
+          echo "== DIST CONTENTS =="
+          ls -la dist
 
       - name: Upload artifact
-        uses: ac
+        uses: actions/upload-artifact@v4
+        with:
+          name: BankBenchmark-Windows
+          path: dist/BankBenchmark.exe
 
