@@ -6,49 +6,35 @@
   <title>Banka Ürün ve Hizmet Ücretleri – Benchmark</title>
   <style>
     body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; padding: 20px; }
-    h1 { margin: 0 0 12px; font-size: 1.4rem; }
-    .meta { color:#666; margin-bottom: 16px; font-size: .9rem; }
-    #table { overflow:auto; border:1px solid #ddd; border-radius:12px; }
+    h1 { margin: 0 0 10px; font-size: 1.25rem; }
+    .meta { color:#666; margin-bottom: 14px; font-size: .9rem; }
+    #table { overflow:auto; border:1px solid #e3e3e3; border-radius: 10px; }
     table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #e3e3e3; padding: 8px 10px; vertical-align: top; }
+    th, td { border: 1px solid #ececec; padding: 8px 10px; vertical-align: top; }
     th { position: sticky; top: 0; background: #fafafa; z-index: 1; }
-    .spinner { display:none; }
   </style>
-  <!-- SheetJS (reads .xlsx in the browser) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <h1>Benchmark_Results.xlsx</h1>
-  <div class="meta">
-    Bu sayfa, repo’daki <code>Benchmark_Results.xlsx</code> dosyasını doğrudan yükler ve ilk sayfayı tablo olarak gösterir.
-  </div>
-
-  <div class="spinner" id="spin">Yükleniyor…</div>
-  <div id="table"></div>
+  <div class="meta">Bu sayfa <code>docs/Benchmark_Results.xlsx</code> dosyasını yükleyip tablo olarak gösterir.</div>
+  <div id="table">Yükleniyor…</div>
 
   <script>
-    const XLSX_URL = "Benchmark_Results.xlsx"; // placed in /docs by the Action
-
-    async function loadXlsx() {
-      const spin = document.getElementById('spin');
-      spin.style.display = 'block';
+    (async () => {
       try {
-        const res = await fetch(XLSX_URL, { cache: "no-store" });
-        if (!res.ok) throw new Error("Dosya bulunamadı: " + res.status);
+        const res = await fetch("Benchmark_Results.xlsx", { cache: "no-store" });
+        if (!res.ok) throw new Error("Excel bulunamadı (HTTP " + res.status + ")");
         const buf = await res.arrayBuffer();
-        const wb = XLSX.read(buf, { type: "array" });
-        const first = wb.SheetNames[0];
-        const ws = wb.Sheets[first];
-        const html = XLSX.utils.sheet_to_html(ws, { editable: false, header: "", footer: "" });
-        document.getElementById('table').innerHTML = html;
+        const wb  = XLSX.read(buf, { type: "array" });
+        const ws  = wb.Sheets[wb.SheetNames[0]];
+        document.getElementById("table").innerHTML =
+          XLSX.utils.sheet_to_html(ws, { header:"", footer:"" });
       } catch (e) {
-        document.getElementById('table').innerHTML = "<p>Yüklenemedi: " + e.message + "</p>";
-      } finally {
-        spin.style.display = 'none';
+        document.getElementById("table").innerHTML =
+          "<p>Yüklenemedi: " + e.message + "</p>";
       }
-    }
-    loadXlsx();
+    })();
   </script>
 </body>
 </html>
-
