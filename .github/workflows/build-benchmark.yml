@@ -1,9 +1,9 @@
-name: Build and publish benchmark
+name: Build and publish benchmark (debug)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"   # every day 06:00 UTC (~09:00 Türkiye)
+    - cron: "0 6 * * *"   # 06:00 UTC (~09:00 Türkiye)
 
 permissions:
   contents: write
@@ -11,43 +11,82 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Show workspace (before)
+        run: |
+          pwd
+          ls -la
+          echo "---- tree (1):"; (command -v tree >/dev/null && tree -a -L 2 || find . -maxdepth 2 -print)
+
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install deps
         run: |
+          set -euxo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -c "import sys; print('Py:', sys.version)"
+          python -c "import playwright, bs4, lxml, openpyxl; print('Deps OK')"
 
       - name: Install Playwright (Chromium)
         run: |
+          set -euxo pipefail
           python -m playwright install --with-deps chromium
 
       - name: Run scraper
         run: |
+          set -euxo pipefail
+          python -c "import os; print('CWD:', os.getcwd())"
           python run_benchmark.py
+          echo "---- after scraper:"
+          ls -la
+          echo "Look for xlsx:"
+          find . -maxdepth 2 -type f -name '*.xlsx' -print || true
+
+      - name: Verify Excel exists
+        run: |
+          set -euxo pipefail
+          test -f Benchmark_Results.xlsx || (echo "::error file=run_benchmark.py::Benchmark_Results.xlsx NOT FOUND"; exit 1)
 
       - name: Publish Excel into docs/
         run: |
+          set -euxo pipefail
           mkdir -p docs
           mv -f Benchmark_Results.xlsx docs/Benchmark_Results.xlsx
-          # optional: keep raw dumps for debugging
-          if [ -d dumps ]; then mkdir -p docs/dumps && cp -r dumps/*.txt docs/dumps/ || true; fi
+          echo "---- after move:"
+          ls -la docs
+
+      - name: Upload artifacts (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-output
+          path: |
+            docs/Benchmark_Results.xlsx
+            dumps/*.txt
+          if-no-files-found: warn
 
       - name: Commit & push if changed
         run: |
+          set -euxo pipefail
+          git status --porcelain
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/Benchmark_Results.xlsx docs/dumps || true
+          git add docs/Benchmark_Results.xlsx
+          git status --porcelain
           if ! git diff --cached --quiet; then
             git commit -m "Update benchmark: $(date -u +'%Y-%m-%d %H:%M:%S') UTC"
             git push
           else
-            echo "No changes."
+            echo "No changes to commit."
           fi
+
+      - name: Show workspace (after)
+        run: |
+          echo "---- tree (final):"; (command -v tree >/dev/null && tree -a -L 2 || find . -maxdepth 2 -print)
