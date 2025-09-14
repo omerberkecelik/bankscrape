@@ -1,10 +1,11 @@
 # run_benchmark.py
 # One-shot: scrape -> dumps/fees_<bank>.txt -> parse (strict + fallback) -> build template -> fill -> save Benchmark_Results.xlsx
 
-# ───────────────────── BEGIN: YOUR SCRAPER (UNCHANGED) ──────────────────────
+# ───────────────────── BEGIN: YOUR SCRAPER (HARDENED FOR CI) ─────────────────
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import re
+import os
 
 URL = "https://www.bankacilikurunvehizmetucretleri.org.tr/bireysel-ucret/liste"
 
@@ -23,9 +24,51 @@ list_of_banks = [
 def safe_name(s: str) -> str:
     return re.sub(r"[^\w\-\.]+", "_", s.strip())
 
+def _snap(page, name):
+    os.makedirs("artifacts", exist_ok=True)
+    page.screenshot(path=f"artifacts/{safe_name(name)}.png", full_page=True)
+    with open(f"artifacts/{safe_name(name)}.html", "w", encoding="utf-8") as f:
+        f.write(page.content())
+
+def wait_pane_ready(page, href, bank_label):
+    # Pane must be visible
+    page.locator(href).wait_for(state="visible", timeout=30000)
+    # Wait until we actually see a money token (TL/TRY/USD) in that pane
+    try:
+        page.wait_for_function(
+            """(sel) => {
+                const n = document.querySelector(sel);
+                if (!n) return false;
+                const t = (n.innerText || '').replace(/\\u00a0/g,' ');
+                return /\\d[\\d.,]*\\s*(TL|TRY|USD)/.test(t);
+            }""",
+            href,
+            timeout=30000,
+        )
+    except Exception:
+        print(f"[WARN] No currency text yet for {bank_label} {href}; snapshot saved.")
+        _snap(page, f"{bank_label}_{href}_empty")
+
 with sync_playwright() as pw:
-    browser = pw.chromium.launch(headless=True)
-    page = browser.new_page()
+    browser = pw.chromium.launch(
+        headless=True,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+        ],
+    )
+    context = browser.new_context(
+        locale="tr-TR",
+        timezone_id="Europe/Istanbul",
+        viewport={"width": 1440, "height": 2600},
+        user_agent=("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+        extra_http_headers={"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"},
+    )
+    page = context.new_page()
+    page.set_default_timeout(45000)
+    page.set_default_navigation_timeout(45000)
 
     page.goto(URL, wait_until="load")
     page.wait_for_load_state("networkidle")
@@ -52,8 +95,10 @@ with sync_playwright() as pw:
                 tab.scroll_into_view_if_needed()
                 tab.click()
                 page.wait_for_load_state("networkidle")
-                page.locator(href).wait_for(state="visible", timeout=15000)
+                # ✅ robust wait for real numbers before parsing
+                wait_pane_ready(page, href, BANK_LABEL)
 
+                # Expand all collapses in this tab
                 page.evaluate(f"""
                 document.querySelectorAll('{href} .collapse').forEach(el => {{
                     el.classList.add('show'); el.style.height='auto';
@@ -64,16 +109,19 @@ with sync_playwright() as pw:
                     f'{href} [data-bs-toggle="collapse"], '
                     f'{href} .card-header button[aria-controls]'
                 )
-                for i in range(togglers.count()):
+                count = togglers.count()
+                for i in range(count):
                     t = togglers.nth(i)
                     exp = t.get_attribute("aria-expanded")
-                    if exp is None or exp.lower() == "false":
+                    if exp is None or (isinstance(exp, str) and exp.lower() == "false"):
                         t.scroll_into_view_if_needed()
                         t.click()
                         page.wait_for_load_state("networkidle")
 
+                # Pick first meaningful option in selects (if any)
                 selects = page.locator(f"{href} select")
-                for i in range(selects.count()):
+                scount = selects.count()
+                for i in range(scount):
                     sel = selects.nth(i)
                     labels = [s.strip() for s in sel.locator("option").all_text_contents()]
                     choice = None
@@ -88,11 +136,11 @@ with sync_playwright() as pw:
                         except Exception:
                             pass
 
-                try:
-                    page.locator(f"{href} tbody tr").first.wait_for(state="visible", timeout=3000)
-                except Exception:
-                    pass
+                # Give UI a moment, then ensure numbers exist
+                page.wait_for_timeout(400)
+                wait_pane_ready(page, href, BANK_LABEL)
 
+                # Parse pane HTML
                 pane_html = page.locator(href).inner_html()
                 soup = BeautifulSoup(pane_html, "html.parser")
 
@@ -152,7 +200,7 @@ with sync_playwright() as pw:
     browser.close()
 
 print("Done. Created one .txt file per bank in the current folder.")
-# ────────────────────── END: YOUR SCRAPER (UNCHANGED) ───────────────────────
+# ────────────────────── END: YOUR SCRAPER (HARDENED FOR CI) ──────────────────
 
 
 # ─────────────── BEGIN: YOUR EXCEL TEMPLATE FUNCTION (UNCHANGED) ─────────────
